@@ -6,9 +6,9 @@ import {
     doc,
     updateDoc,
     query,
-    where,
     orderBy,
-    serverTimestamp
+    serverTimestamp,
+    addDoc
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 
 // --- KitchenAudioManager for notification sounds ---
@@ -16,7 +16,6 @@ class KitchenAudioManager {
     constructor() {
         this.audio = document.getElementById('notification-sound');
         this.audioEnabled = false;
-        this.lastOrderCount = 0;
         this.setupAudioPermissions();
     }
 
@@ -29,11 +28,6 @@ class KitchenAudioManager {
                 enableBtn.style.display = 'none';
             });
         }
-
-        // Auto-hide button if audio is already enabled
-        if (this.audioEnabled) {
-            if (enableBtn) enableBtn.style.display = 'none';
-        }
     }
 
     async enableAudio() {
@@ -43,16 +37,13 @@ class KitchenAudioManager {
                 return;
             }
 
-            // Play and immediately pause to unlock audio
-            this.audio.volume = 0.7; // Set volume to 70%
+            this.audio.volume = 0.7;
             await this.audio.play();
             this.audio.pause();
             this.audio.currentTime = 0;
             this.audioEnabled = true;
             
-            // Also request notification permission
             this.requestNotificationPermission();
-            
             console.log('✅ Audio enabled successfully');
         } catch (error) {
             console.error('❌ Failed to enable audio:', error);
@@ -74,10 +65,7 @@ class KitchenAudioManager {
         }
 
         try {
-            // Reset audio to beginning
             this.audio.currentTime = 0;
-            
-            // Play the notification
             const playPromise = this.audio.play();
             
             if (playPromise !== undefined) {
@@ -87,8 +75,6 @@ class KitchenAudioManager {
                     })
                     .catch(error => {
                         console.error('❌ Error playing notification:', error);
-                        // Fallback: try to enable audio again
-                        this.enableAudio();
                     });
             }
         } catch (error) {
@@ -96,10 +82,132 @@ class KitchenAudioManager {
         }
     }
 
-    // Test method
     testSound() {
         console.log('🧪 Testing notification sound...');
         this.playNotification();
+    }
+}
+
+// --- PIN Authentication System ---
+class KitchenAuth {
+    constructor() {
+        this.authorizedPins = {
+            '1234': 'Kitchen Manager',
+            '5678': 'Sr. Chef',
+            '4321': 'Jr. Chef',
+        };
+        this.currentUser = null;
+        this.setupPinLogin();
+    }
+
+    setupPinLogin() {
+        const pinForm = document.getElementById('pin-login-form');
+        if (pinForm) {
+            pinForm.addEventListener('submit', (e) => {
+                e.preventDefault();
+                this.handlePinLogin();
+            });
+        }
+
+        // Auto-format PIN input
+        const pinInput = document.getElementById('chef-pin');
+        if (pinInput) {
+            pinInput.addEventListener('input', (e) => {
+                e.target.value = e.target.value.replace(/\D/g, '').slice(0, 4);
+            });
+
+            // Auto-submit when PIN is 4 digits
+            pinInput.addEventListener('keyup', (e) => {
+                if (e.target.value.length === 4) {
+                    setTimeout(() => {
+                        const selectedChef = document.getElementById('chef-name').value;
+                        if (selectedChef) {
+                            this.handlePinLogin();
+                        }
+                    }, 500);
+                }
+            });
+        }
+    }
+
+    handlePinLogin() {
+        const pin = document.getElementById('chef-pin').value;
+        const selectedChef = document.getElementById('chef-name').value;
+        
+        if (pin.length !== 4) {
+            this.showLoginError('Please enter a 4-digit PIN');
+            return;
+        }
+
+        if (!selectedChef) {
+            this.showLoginError('Please select your name');
+            return;
+        }
+
+        if (this.authorizedPins[pin]) {
+            // Successful login
+            this.currentUser = {
+                pin: pin,
+                name: this.authorizedPins[pin],
+                selectedName: selectedChef,
+                loginTime: new Date()
+            };
+            
+            this.showKitchenDashboard();
+            this.logAccess();
+            console.log('✅ Chef logged in:', this.currentUser.name);
+        } else {
+            this.showLoginError('Invalid PIN. Please try again.');
+            this.clearPinInput();
+        }
+    }
+
+    clearPinInput() {
+        document.getElementById('chef-pin').value = '';
+        document.getElementById('chef-name').value = '';
+    }
+
+    showLoginError(message) {
+        const errorElement = document.getElementById('login-error');
+        errorElement.textContent = message;
+        errorElement.style.display = 'block';
+        
+        setTimeout(() => {
+            errorElement.style.display = 'none';
+        }, 3000);
+    }
+
+    showKitchenDashboard() {
+        document.getElementById('login-container').style.display = 'none';
+        document.getElementById('kitchen-dashboard').style.display = 'block';
+        
+        // Display user info
+        const userInfo = document.getElementById('user-info');
+        if (userInfo && this.currentUser) {
+            userInfo.textContent = `${this.currentUser.name}`;
+        }
+    }
+
+    async logAccess() {
+        try {
+            // Log to Firestore for tracking
+            await addDoc(collection(db, 'kitchen_access_logs'), {
+                chefName: this.currentUser.name,
+                selectedName: this.currentUser.selectedName,
+                loginTime: new Date(),
+                action: 'login'
+            });
+        } catch (error) {
+            console.error('Failed to log access:', error);
+        }
+    }
+
+    logout() {
+        this.currentUser = null;
+        document.getElementById('login-container').style.display = 'flex';
+        document.getElementById('kitchen-dashboard').style.display = 'none';
+        this.clearPinInput();
+        console.log('👋 Chef logged out');
     }
 }
 
@@ -115,20 +223,30 @@ class KitchenDisplay {
             ready: 0,
             completed: 0
         };
-        this.previousPendingCount = 0; // Track previous count for new order detection
+        this.previousOrders = [];
+        this.auth = new KitchenAuth();
         
         this.init();
     }
     
     init() {
         console.log('🚀 Initializing Kitchen Display System...');
-        this.setupOrderListener();
         this.setupEventListeners();
         this.startClock();
+        
+        // Only start order listener if user is authenticated
+        if (this.auth.currentUser) {
+            this.setupOrderListener();
+            this.displayOrders();
+        }
+    }
+
+    // Start order monitoring (called after login)
+    startOrderMonitoring() {
+        this.setupOrderListener();
         this.displayOrders();
     }
     
-    // Real-time order listener
     setupOrderListener() {
         const ordersQuery = query(
             this.ordersRef,
@@ -138,8 +256,7 @@ class KitchenDisplay {
         onSnapshot(ordersQuery, (snapshot) => {
             console.log('📊 Orders updated, total:', snapshot.size);
             
-            // Track changes for new order detection
-            const previousOrders = [...this.orders];
+            this.previousOrders = [...this.orders];
             this.orders = [];
             
             const thirtyMinutesAgo = new Date(Date.now() - 30 * 60 * 1000);
@@ -147,16 +264,13 @@ class KitchenDisplay {
             snapshot.forEach((doc) => {
                 const orderData = { id: doc.id, ...doc.data() };
                 
-                // Include recent orders or non-completed orders
                 if (orderData.status !== 'completed' || 
                     (orderData.timestamp && orderData.timestamp.toDate() > thirtyMinutesAgo)) {
                     this.orders.push(orderData);
                 }
             });
             
-            // Check for new orders
-            this.detectNewOrders(previousOrders);
-            
+            this.detectNewOrders();
             this.updateOrderCounts();
             this.displayOrders();
             
@@ -166,15 +280,12 @@ class KitchenDisplay {
         });
     }
     
-    // Detect new orders and trigger notifications
-    detectNewOrders(previousOrders) {
+    detectNewOrders() {
         const currentPendingOrders = this.orders.filter(o => o.status === 'pending');
         const newOrders = currentPendingOrders.filter(currentOrder => {
-            // Check if this order wasn't in the previous orders
-            return !previousOrders.some(prevOrder => prevOrder.id === currentOrder.id);
+            return !this.previousOrders.some(prevOrder => prevOrder.id === currentOrder.id);
         });
 
-        // Only trigger notifications for truly new orders (within last 2 minutes)
         const recentNewOrders = newOrders.filter(order => {
             if (!order.timestamp) return false;
             const orderTime = order.timestamp.toDate();
@@ -185,24 +296,20 @@ class KitchenDisplay {
         if (recentNewOrders.length > 0) {
             console.log('🆕 New orders detected:', recentNewOrders.length);
             
-            // Play notification sound
             if (window.audioManager) {
                 window.audioManager.playNotification();
             }
             
-            // Show browser notifications
             recentNewOrders.forEach(order => {
                 this.showNewOrderNotification(order);
             });
 
-            // Add vibration for mobile devices
             if ('vibrate' in navigator) {
                 navigator.vibrate([200, 100, 200, 100, 200]);
             }
         }
     }
     
-    // Update order counts in header
     updateOrderCounts() {
         this.orderCounts = {
             pending: this.orders.filter(o => o.status === 'pending').length,
@@ -211,7 +318,6 @@ class KitchenDisplay {
             completed: this.orders.filter(o => o.status === 'completed').length
         };
         
-        // Update header stats
         Object.keys(this.orderCounts).forEach(status => {
             const element = document.getElementById(`${status}-count`);
             if (element) {
@@ -224,9 +330,8 @@ class KitchenDisplay {
             }
         });
     }
-    
+
     showNewOrderNotification(order) {
-        // Browser notification
         if ('Notification' in window && Notification.permission === 'granted') {
             const notification = new Notification('🔔 New Order Received!', {
                 body: `Table ${order.tableNumber} - Order #${order.orderNumber || 'N/A'} - ₹${order.total}`,
@@ -235,18 +340,15 @@ class KitchenDisplay {
                 requireInteraction: true
             });
 
-            // Auto-close notification after 10 seconds
             setTimeout(() => {
                 notification.close();
             }, 10000);
         }
 
-        // Visual notification in the interface
         this.showVisualNotification(order);
     }
 
     showVisualNotification(order) {
-        // Create a temporary visual notification
         const notification = document.createElement('div');
         notification.className = 'visual-notification';
         notification.innerHTML = `
@@ -261,7 +363,6 @@ class KitchenDisplay {
         
         document.body.appendChild(notification);
         
-        // Remove after 5 seconds
         setTimeout(() => {
             if (notification.parentNode) {
                 notification.remove();
@@ -269,11 +370,9 @@ class KitchenDisplay {
         }, 5000);
     }
     
-    // Set active tab
     setActiveTab(status) {
         this.activeTab = status;
         
-        // Update tab buttons
         document.querySelectorAll('.tab-btn').forEach(btn => {
             btn.classList.remove('active');
         });
@@ -285,7 +384,6 @@ class KitchenDisplay {
         this.displayOrders();
     }
     
-    // Display orders based on active tab
     displayOrders() {
         const ordersGrid = document.getElementById('orders-grid');
         const emptyState = document.getElementById('empty-state');
@@ -294,21 +392,17 @@ class KitchenDisplay {
         
         let filteredOrders = this.orders;
         
-        // Filter by active tab
         if (this.activeTab !== 'all') {
             filteredOrders = this.orders.filter(order => order.status === this.activeTab);
         }
         
-        // Sort orders by priority
         filteredOrders.sort((a, b) => {
-            // Priority: urgent orders first, then by timestamp
             const aUrgent = this.isUrgentOrder(a);
             const bUrgent = this.isUrgentOrder(b);
             
             if (aUrgent && !bUrgent) return -1;
             if (!aUrgent && bUrgent) return 1;
             
-            // Then by timestamp (oldest first)
             const aTime = a.timestamp ? a.timestamp.toDate() : new Date();
             const bTime = b.timestamp ? b.timestamp.toDate() : new Date();
             return aTime - bTime;
@@ -327,7 +421,6 @@ class KitchenDisplay {
         }
     }
     
-    // Create order card HTML
     createOrderCard(order) {
         const timeAgo = this.getTimeAgo(order.timestamp);
         const timeElapsed = this.getTimeElapsed(order.timestamp);
@@ -387,7 +480,6 @@ class KitchenDisplay {
         `;
     }
     
-    // Get action buttons based on order status
     getActionButtons(order) {
         switch (order.status) {
             case 'pending':
@@ -428,7 +520,6 @@ class KitchenDisplay {
         }
     }
     
-    // Order status update methods
     async startPreparing(orderId) {
         await this.updateOrderStatus(orderId, 'preparing');
     }
@@ -446,12 +537,12 @@ class KitchenDisplay {
             const orderRef = doc(this.ordersRef, orderId);
             await updateDoc(orderRef, {
                 status: newStatus,
-                [`${newStatus}At`]: serverTimestamp()
+                [`${newStatus}At`]: serverTimestamp(),
+                updatedBy: this.auth.currentUser ? this.auth.currentUser.name : 'Unknown'
             });
             
-            console.log(`✅ Order ${orderId} updated to ${newStatus}`);
+            console.log(`✅ Order ${orderId} updated to ${newStatus} by ${this.auth.currentUser?.name}`);
             
-            // Add visual feedback
             const orderCard = document.querySelector(`[data-order-id="${orderId}"]`);
             if (orderCard) {
                 orderCard.classList.add('loading');
@@ -466,7 +557,6 @@ class KitchenDisplay {
         }
     }
     
-    // Show order details modal
     showOrderDetails(orderId) {
         const order = this.orders.find(o => o.id === orderId);
         if (!order) return;
@@ -518,16 +608,17 @@ class KitchenDisplay {
         actions.innerHTML = this.getActionButtons(order);
         
         modal.classList.add('active');
+        modal.style.display = 'flex';
         document.body.style.overflow = 'hidden';
     }
     
     closeOrderModal() {
         const modal = document.getElementById('order-modal');
         modal.classList.remove('active');
+        modal.style.display = 'none';
         document.body.style.overflow = '';
     }
     
-    // Utility methods
     getTimeAgo(timestamp) {
         if (!timestamp) return 'Unknown time';
         
@@ -565,27 +656,23 @@ class KitchenDisplay {
         const diffMs = now - orderTime;
         const diffMins = Math.floor(diffMs / (1000 * 60));
         
-        // Mark as urgent if pending for more than 15 minutes or preparing for more than 30 minutes
         return (order.status === 'pending' && diffMins > 15) ||
                (order.status === 'preparing' && diffMins > 30);
     }
     
     getEstimatedTime(order) {
-        const baseTime = 15; // Base preparation time
+        const baseTime = 15;
         const itemComplexity = order.items.reduce((time, item) => {
-            // Add time based on item complexity
             return time + (item.quantity * 2);
         }, 0);
         
-        return Math.min(baseTime + itemComplexity, 45); // Max 45 minutes
+        return Math.min(baseTime + itemComplexity, 45);
     }
     
     showError(message) {
         console.error('💥 Kitchen Display Error:', message);
-        // You can implement a toast notification here
     }
     
-    // Clock functionality
     startClock() {
         this.updateClock();
         setInterval(() => this.updateClock(), 1000);
@@ -613,9 +700,16 @@ class KitchenDisplay {
         }
     }
     
-    // Event listeners
     setupEventListeners() {
-        // Close modal when clicking outside
+        // Logout button
+        const logoutBtn = document.getElementById('logout-btn');
+        if (logoutBtn) {
+            logoutBtn.addEventListener('click', () => {
+                this.auth.logout();
+            });
+        }
+        
+        // Modal close
         document.addEventListener('click', (e) => {
             if (e.target.classList.contains('modal-overlay')) {
                 this.closeOrderModal();
@@ -628,7 +722,6 @@ class KitchenDisplay {
                 this.closeOrderModal();
             }
             
-            // Tab shortcuts (1-4 keys)
             if (e.key >= '1' && e.key <= '4') {
                 const tabs = ['pending', 'preparing', 'ready', 'completed'];
                 const tabIndex = parseInt(e.key) - 1;
@@ -637,25 +730,30 @@ class KitchenDisplay {
                 }
             }
 
-            // Test sound with 'T' key
             if (e.key.toLowerCase() === 't' && window.audioManager) {
                 window.audioManager.testSound();
             }
         });
         
-        // Request notification permission on page load
         if ('Notification' in window && Notification.permission === 'default') {
             Notification.requestPermission();
         }
+
+        // Start monitoring after successful login
+        const originalShowDashboard = this.auth.showKitchenDashboard.bind(this.auth);
+        this.auth.showKitchenDashboard = () => {
+            originalShowDashboard();
+            this.startOrderMonitoring();
+        };
     }
 }
 
-// Initialize audio manager first
+// Initialize audio manager
 const audioManager = new KitchenAudioManager();
-window.audioManager = audioManager; // Make globally accessible
+window.audioManager = audioManager;
 
 // Initialize the kitchen display
 const kitchenDisplay = new KitchenDisplay();
-window.kitchenDisplay = kitchenDisplay; // Make globally accessible
+window.kitchenDisplay = kitchenDisplay;
 
 console.log('🚀 Kitchen Display System loaded successfully!');
