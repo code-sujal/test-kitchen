@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kitchen Display System</title>
+    <link rel="stylesheet" href="style.css">
+    <!-- Font for better readability -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Header -->
+    <header class="kitchen-header">
+        <div class="header-content">
+            <div class="header-left">
+                <h1>Kitchen Display System</h1>
+                <div class="current-time" id="current-time"></div>
+            </div>
+            <div class="header-stats">
+                <div class="stat-card pending">
+                    <span class="stat-number" id="pending-count">0</span>
+                    <span class="stat-label">Pending</span>
+                </div>
+                <div class="stat-card preparing">
+                    <span class="stat-number" id="preparing-count">0</span>
+                    <span class="stat-label">Preparing</span>
+                </div>
+                <div class="stat-card ready">
+                    <span class="stat-number" id="ready-count">0</span>
+                    <span class="stat-label">Ready</span>
+                </div>
+                <div class="stat-card completed">
+                    <span class="stat-number" id="completed-count">0</span>
+                    <span class="stat-label">Completed</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Order Status Tabs -->
+    <nav class="order-tabs">
+        <button class="tab-btn active" data-status="pending" onclick="kitchenDisplay.setActiveTab('pending')">
+            Pending Orders <span class="tab-count" id="tab-pending">0</span>
+        </button>
+        <button class="tab-btn" data-status="preparing" onclick="kitchenDisplay.setActiveTab('preparing')">
+            Preparing <span class="tab-count" id="tab-preparing">0</span>
+        </button>
+        <button class="tab-btn" data-status="ready" onclick="kitchenDisplay.setActiveTab('ready')">
+            Ready <span class="tab-count" id="tab-ready">0</span>
+        </button>
+        <button class="tab-btn" data-status="completed" onclick="kitchenDisplay.setActiveTab('completed')">
+            Completed <span class="tab-count" id="tab-completed">0</span>
+        </button>
+    </nav>
+
+    <!-- Orders Container -->
+    <main class="orders-container">
+        <div class="orders-grid" id="orders-grid">
+            <!-- Orders will be populated here -->
+        </div>
+        
+        <!-- Empty State -->
+        <div class="empty-state" id="empty-state" style="display: none;">
+            <div class="empty-icon">📋</div>
+            <h3>No Orders</h3>
+            <p>No orders in this category yet</p>
+        </div>
+    </main>
+
+    <!-- Order Detail Modal -->
+    <div class="modal-overlay" id="order-modal" style="display: none;">
+        <div class="modal-container">
+            <div class="modal-header">
+                <h2 id="modal-order-title">Order Details</h2>
+                <button class="close-btn" onclick="kitchenDisplay.closeOrderModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="modal-order-content">
+                <!-- Order details will be populated here -->
+            </div>
+            <div class="modal-actions" id="modal-actions">
+                <!-- Action buttons will be populated here -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Sound placeholder for you to implement -->
+    <!-- Place this in your kitchen-display/index.html -->
+<audio id="notification-sound" preload="auto">
+    <source src="./mixkit-security-facility-breach-alarm-994.mp3" type="audio/mpeg">
+    <source src="./notification.wav" type="audio/wav">
+    Your browser does not support the audio element.
+</audio>
+
+<!-- Add a user interaction button to enable audio -->
+<button id="enable-audio" class="enable-audio-btn" style="display: block;">
+    🔊 Enable Notifications
+</button>
+
+
+    <script type="module" src="script.js"></script>
+</body>
+</html>
